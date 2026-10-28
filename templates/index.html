@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Study Point Coaching Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&family=Hind+Siliguri:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav class="glass nav">
+  <a class="logo" href="#top">Study <b>Point</b></a>
+  <div class="links">
+    <a href="#classes">Classes</a><a href="#materials">Notes</a><a href="#booking">Book Seat</a><a href="#contact">Contact</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="sakura" id="sakura"></div>
+  <div class="wrap hero-grid">
+    <div>
+      <span class="pill">🌸 Admission Open 2026 · ভর্তি চলছে</span>
+      <h1>Study Point<br><span>Coaching Center</span></h1>
+      <div class="bubble">Dream. Learn. Achieve.<small>স্বপ্ন দেখো, শেখো, জয় করো</small></div><br>
+      <a class="btn" href="#booking">Book a Seat</a><a class="btn ghost" href="#materials">Download Notes</a>
+    </div>
+    <div class="glass hero-card">
+      <div class="emoji">🎓</div>
+      <p>Class 6 থেকে Class 11 · Small batches · Regular exams</p>
+    </div>
+  </div>
+</header>
+
+<section id="classes">
+  <h2 class="sec">Our Classes</h2>
+  <div class="grid" id="classGrid"></div>
+</section>
+
+<section id="materials">
+  <h2 class="sec">Study Notes</h2>
+  <div class="toolbar">
+    <select id="matClass"></select>
+    <input id="matSearch" placeholder="Search notes…">
+  </div>
+  <div class="grid" id="matGrid"></div>
+</section>
+
+<section id="booking">
+  <h2 class="sec">Book a Seat</h2>
+  <form class="glass form" id="bookForm">
+    <select name="class_id" id="bookClass" required></select>
+    <input name="name" placeholder="Student name" required>
+    <input name="phone" type="tel" placeholder="Phone number" required>
+    <input name="email" type="email" placeholder="Email (optional)">
+    <textarea name="message" rows="3" placeholder="Message (optional)"></textarea>
+    <button class="btn">Submit Booking</button>
+    <p class="msg" id="bookMsg"></p>
+  </form>
+</section>
+
+<footer class="foot" id="contact">
+  <div class="glass">
+    <p>📍 Your Center Address · 📞 +880 1XXX-XXXXXX · ✉️ info@studypoint.com</p>
+    <p style="margin-top:8px">© 2026 Study Point · <a href="/student">Student login</a> · <a href="/admin">Admin</a></p>
+  </div>
+</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function loadClasses() {
+  const list = await (await fetch("/api/classes")).json();
+  $("#classGrid").innerHTML = list.map(c => `
+    <a class="glass card" href="#materials" onclick="filterClass(${c.id})">
+      <div class="ic">📘</div>
+      <h3>${esc(c.name)}</h3>
+      <p>${esc(c.description)}</p>
+      <small>${c.materials} notes available</small>
+    </a>`).join("");
+  const opts = list.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  $("#matClass").innerHTML = `<option value="">All classes</option>` + opts;
+  $("#bookClass").innerHTML = opts;
+}
+
+function filterClass(id) {
+  $("#matClass").value = id;
+  loadMaterials();
+}
+
+async function loadMaterials() {
+  const cid = $("#matClass").value;
+  const q = $("#matSearch").value.trim().toLowerCase();
+  const list = await (await fetch("/api/materials" + (cid ? "?class_id=" + cid : ""))).json();
+  const shown = list.filter(m => (m.title + " " + m.subject).toLowerCase().includes(q));
+  $("#matGrid").innerHTML = shown.length ? shown.map(m => `
+    <div class="glass card">
+      <span class="badge">${esc(m.class_name || "General")} · ${esc(m.subject)}</span>
+      <h3>${esc(m.title)}</h3>
+      <a class="btn small" href="/download/${m.id}">⬇ Download</a>
+    </div>`).join("") : `<p class="empty">কোনো note পাওয়া যায়নি · No notes yet</p>`;
+}
+
+$("#matClass").onchange = loadMaterials;
+$("#matSearch").oninput = loadMaterials;
+
+$("#bookForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const r = await fetch("/api/bookings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.fromEntries(new FormData(e.target)))
+  });
+  const d = await r.json();
+  const msg = $("#bookMsg");
+  msg.textContent = d.message || d.error;
+  msg.className = "msg " + (r.ok ? "ok" : "bad");
+  if (r.ok) e.target.reset();
+});
+
+// Falling sakura petals
+const box = $("#sakura");
+for (let i = 0; i < 18; i++) {
+  const s = document.createElement("span");
+  s.textContent = i % 3 ? "🌸" : "✿";
+  s.style.left = Math.random() * 100 + "%";
+  s.style.fontSize = (12 + Math.random() * 16) + "px";
+  s.style.animationDuration = (8 + Math.random() * 10) + "s";
+  s.style.animationDelay = -(Math.random() * 15) + "s";
+  box.appendChild(s);
+}
+
+loadClasses().then(loadMaterials);
+</script>
+</body>
+</html>

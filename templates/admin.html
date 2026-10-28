@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Admin · Study Point</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&family=Hind+Siliguri:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav class="glass nav">
+  <a class="logo" href="/">Study <b>Point</b> Admin</a>
+  <a class="btn ghost small" href="/admin/admissions">Admissions</a>
+  <button class="btn ghost small" id="logoutBtn" hidden>Logout</button>
+</nav>
+
+<main>
+  <section class="glass login" id="loginBox">
+    <h2 class="sec" style="margin-bottom:18px">🔐 Admin Login</h2>
+    <form id="loginForm" class="form">
+      <input name="email" type="email" placeholder="Admin email" required>
+      <input name="password" type="password" placeholder="Password" required>
+      <button class="btn">Login</button>
+      <p class="msg bad" id="loginMsg"></p>
+    </form>
+  </section>
+
+  <div id="panel" hidden>
+    <div class="tabs">
+      <button class="tab active" data-tab="classes">Classes</button>
+      <button class="tab" data-tab="materials">Notes / Files</button>
+      <button class="tab" data-tab="bookings">Bookings</button>
+    </div>
+
+    <div id="tab-classes">
+      <form class="glass form-row" id="classForm">
+        <input name="name" placeholder="Class name, e.g. Class 9" required>
+        <input name="description" placeholder="Short description">
+        <button class="btn small">+ Add Class</button>
+      </form>
+      <div class="stack" id="classList"></div>
+    </div>
+
+    <div id="tab-materials" hidden>
+      <form class="glass form" id="matForm" style="margin-bottom:22px">
+        <select name="class_id" id="matFormClass" required></select>
+        <input name="title" placeholder="Title, e.g. Chapter 3 Notes" required>
+        <input name="subject" placeholder="Subject, e.g. Math" required>
+        <input name="file" type="file" required accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.zip">
+        <button class="btn">⬆ Upload</button>
+        <p class="msg" id="matMsg"></p>
+      </form>
+      <div class="stack" id="matList"></div>
+    </div>
+
+    <div id="tab-bookings" hidden>
+      <div class="stack" id="bookList"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const send = (method, body) => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: body ? JSON.stringify(body) : undefined
+});
+const formData = e => Object.fromEntries(new FormData(e.target));
+
+async function api(url, opts = {}) {
+  const r = await fetch(url, opts);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "Request failed");
+  return d;
+}
+
+function setLoggedIn(on) {
+  $("#loginBox").hidden = on;
+  $("#panel").hidden = !on;
+  $("#logoutBtn").hidden = !on;
+  if (on) refreshAll();
+}
+function refreshAll() {
+  loadClasses();
+  loadMaterials();
+  loadBookings();
+}
+
+$("#loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  try {
+    await api("/api/admin/login", send("POST", formData(e)));
+    $("#loginMsg").textContent = "";
+    setLoggedIn(true);
+  } catch (err) {
+    $("#loginMsg").textContent = err.message;
+  }
+});
+$("#logoutBtn").onclick = async () => {
+  await api("/api/admin/logout", send("POST"));
+  setLoggedIn(false);
+};
+
+document.querySelectorAll(".tab").forEach(btn => btn.onclick = () => {
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t === btn));
+  ["classes", "materials", "bookings"].forEach(name => {
+    $("#tab-" + name).hidden = name !== btn.dataset.tab;
+  });
+});
+
+// ----- Classes -----
+async function loadClasses() {
+  const list = await api("/api/classes");
+  $("#classList").innerHTML = list.map(c => `
+    <div class="glass row">
+      <div><b>${esc(c.name)}</b><br><small>${esc(c.description)} · ${c.materials} files</small></div>
+      <button class="btn danger small" onclick="delClass(${c.id})">Delete</button>
+    </div>`).join("") || `<p class="empty">No classes yet</p>`;
+  $("#matFormClass").innerHTML = list.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+}
+$("#classForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  try {
+    await api("/api/admin/classes", send("POST", formData(e)));
+    e.target.reset();
+    loadClasses();
+  } catch (err) { alert(err.message); }
+});
+async function delClass(id) {
+  if (!confirm("এই class ও এর সব file মুছে যাবে. Delete class and all its files?")) return;
+  try {
+    await api("/api/admin/classes/" + id, send("DELETE"));
+    refreshAll();
+  } catch (err) { alert(err.message); }
+}
+
+// ----- Notes / files -----
+async function loadMaterials() {
+  const list = await api("/api/materials");
+  $("#matList").innerHTML = list.map(m => `
+    <div class="glass row">
+      <div><b>${esc(m.title)}</b><br><small>${esc(m.class_name || "General")} · ${esc(m.subject)} · ${esc(m.original)}</small></div>
+      <div class="actions">
+        <a class="btn ghost small" href="/download/${m.id}">Download</a>
+        <button class="btn danger small" onclick="delMat(${m.id})">Delete</button>
+      </div>
+    </div>`).join("") || `<p class="empty">No files yet</p>`;
+}
+$("#matForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const msg = $("#matMsg");
+  msg.className = "msg";
+  msg.textContent = "Uploading…";
+  try {
+    await api("/api/admin/materials", { method: "POST", body: new FormData(e.target) });
+    msg.className = "msg ok";
+    msg.textContent = "Uploaded successfully";
+    e.target.reset();
+    loadMaterials();
+  } catch (err) {
+    msg.className = "msg bad";
+    msg.textContent = err.message;
+  }
+});
+async function delMat(id) {
+  if (!confirm("Delete this file?")) return;
+  try {
+    await api("/api/admin/materials/" + id, send("DELETE"));
+    loadMaterials();
+  } catch (err) { alert(err.message); }
+}
+
+// ----- Bookings -----
+const STATUSES = ["new", "confirmed", "done", "cancelled"];
+async function loadBookings() {
+  const list = await api("/api/admin/bookings");
+  $("#bookList").innerHTML = list.map(b => `
+    <div class="glass row">
+      <div><b>${esc(b.name)}</b> · ${esc(b.phone)}<br>
+        <small>${esc(b.class_name || "—")} · ${esc(b.email || "no email")} · ${esc(b.created)}</small>
+        ${b.message ? `<br><small>${esc(b.message)}</small>` : ""}
+      </div>
+      <div class="actions">
+        <select onchange="setStatus(${b.id}, this.value)">
+          ${STATUSES.map(s => `<option ${s === b.status ? "selected" : ""}>${s}</option>`).join("")}
+        </select>
+        <button class="btn danger small" onclick="delBooking(${b.id})">Delete</button>
+      </div>
+    </div>`).join("") || `<p class="empty">No bookings yet</p>`;
+}
+async function setStatus(id, status) {
+  try {
+    await api("/api/admin/bookings/" + id, send("PATCH", { status }));
+  } catch (err) { alert(err.message); }
+}
+async function delBooking(id) {
+  if (!confirm("Delete this booking?")) return;
+  try {
+    await api("/api/admin/bookings/" + id, send("DELETE"));
+    loadBookings();
+  } catch (err) { alert(err.message); }
+}
+
+// Keep the admin logged in while the session cookie is valid
+api("/api/admin/me").then(d => setLoggedIn(d.admin));
+</script>
+</body>
+</html>

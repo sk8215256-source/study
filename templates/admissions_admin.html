@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Admissions · Study Point Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&family=Hind+Siliguri:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav class="glass nav">
+  <a class="logo" href="/admin">Study <b>Point</b> Admissions</a>
+  <a class="btn ghost small" href="/admin">Admin home</a>
+</nav>
+
+<main>
+  <p class="glass msg bad" id="gate" hidden></p>
+
+  <div id="panel" hidden>
+    <div class="tabs">
+      <button class="tab active" data-t="apps">Applications</button>
+      <button class="tab" data-t="students">Students</button>
+      <button class="tab" data-t="audit">Audit log</button>
+    </div>
+
+    <div id="t-apps">
+      <div class="glass toolbar">
+        <input id="fq" placeholder="Search name, student ID, application ID, email, mobile">
+        <select id="fstatus">
+          <option value="">All statuses</option>
+          <option value="pending_review">Pending review</option>
+          <option value="correction_requested">Correction requested</option>
+          <option value="accepted">Accepted</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <input id="fdistrict" placeholder="District">
+        <input id="fcourse" placeholder="Course">
+        <select id="fsort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
+      </div>
+      <div class="stack" id="appList"></div>
+      <div class="glass" id="detail" hidden></div>
+    </div>
+
+    <div id="t-students" hidden>
+      <input id="sq" placeholder="Search students" style="margin-bottom:14px">
+      <div class="stack" id="stuList"></div>
+    </div>
+
+    <div id="t-audit" hidden>
+      <div class="stack" id="auditList"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const LABELS = { pending_review: "Pending review", correction_requested: "Correction requested", accepted: "Accepted", rejected: "Rejected" };
+const ACTION_TEXT = { accept: "accept", reject: "reject", request_correction: "request correction for" };
+let fieldLabels = {};
+
+async function api(url, method = "GET", body) {
+  const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "Request failed");
+  return d;
+}
+
+async function loadApps() {
+  const p = new URLSearchParams({
+    q: $("#fq").value, status: $("#fstatus").value, district: $("#fdistrict").value,
+    course: $("#fcourse").value, sort: $("#fsort").value
+  });
+  const list = await api("/api/admin/admissions?" + p);
+  $("#appList").innerHTML = list.map(a => `
+    <div class="glass row">
+      <div><b>${esc(a.full_name)}</b> · ${esc(a.app_code)} · ${esc(a.student_code)}<br>
+        <small>${esc(a.course)} · ${esc(a.district)} · ${esc(a.mobile)} · ${esc(a.submitted)}</small></div>
+      <div class="actions"><span class="badge">${LABELS[a.status]}</span>
+        <button class="btn small" onclick="openApp(${a.id})">Open</button></div>
+    </div>`).join("") || `<p class="empty">No applications found</p>`;
+}
+
+async function openApp(id) {
+  const a = await api("/api/admin/admissions/" + id);
+  const d = a.data;
+  const box = $("#detail");
+  box.hidden = false;
+  box.innerHTML = `
+    <h2 class="sec" style="text-align:left">${esc(a.account_name)} · ${esc(a.app_code)}</h2>
+    <p>Status: <span class="badge">${LABELS[a.status]}</span> · Student ID ${esc(a.student_code)} · ${esc(a.email)} · ${esc(a.mobile)}</p>
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr));margin:14px 0">
+      ${Object.keys(fieldLabels).map(k => `<div><small>${esc(fieldLabels[k])}</small><br><b>${esc(d[k]) || "—"}</b></div>`).join("")}
+    </div>
+    <div class="actions">
+      <button class="btn small" onclick="act(${a.id}, 'accept')">✅ Accept</button>
+      <button class="btn small danger" onclick="act(${a.id}, 'reject')">Reject</button>
+      <button class="btn small ghost" onclick="act(${a.id}, 'request_correction')">Request correction</button>
+    </div>
+    <div class="form" style="margin-top:14px">
+      <textarea id="dnote" rows="2" placeholder="Message to student (required for reject or correction)"></textarea>
+      <textarea id="inote" rows="2" placeholder="Internal note (admin only)">${esc(a.internal_note)}</textarea>
+      <button class="btn ghost small" onclick="saveInternal(${a.id})">Save internal note</button>
+    </div>
+    <h3 class="fsec">Audit trail</h3>
+    ${a.audit.map(x => `<small>${esc(x.created)} · ${esc(x.actor)} · ${esc(x.action)} ${esc(x.detail)}</small><br>`).join("")}`;
+  box.scrollIntoView({ behavior: "smooth" });
+}
+
+async function act(id, action) {
+  if (!confirm(`Are you sure you want to ${ACTION_TEXT[action]} this application?`)) return;
+  try {
+    await api(`/api/admin/admissions/${id}/decision`, "POST", { action, note: $("#dnote").value.trim() });
+    await loadApps();
+    await openApp(id);
+  } catch (err) { alert(err.message); }
+}
+
+async function saveInternal(id) {
+  try {
+    await api(`/api/admin/admissions/${id}/internal-note`, "PUT", { note: $("#inote").value });
+    alert("Internal note saved");
+  } catch (err) { alert(err.message); }
+}
+
+async function loadStudents() {
+  const text = $("#sq").value.trim().toLowerCase();
+  const list = (await api("/api/admin/students")).filter(s =>
+    (s.full_name + " " + s.student_code + " " + s.email + " " + s.mobile).toLowerCase().includes(text));
+  $("#stuList").innerHTML = list.map(s => `
+    <div class="glass row">
+      <div><b>${esc(s.full_name)}</b> · ${esc(s.student_code)}<br>
+        <small>${esc(s.email)} · ${esc(s.mobile)} · registered ${esc(s.created)} · last login ${esc(s.last_login || "never")}</small><br>
+        <small>Account: ${esc(s.account_status)} · Admission: ${s.admission_status ? LABELS[s.admission_status] : "Registered (no application)"}</small>
+      </div>
+      <button class="btn small ${s.account_status === "active" ? "danger" : ""}"
+        onclick="setAccount(${s.id}, '${s.account_status === "active" ? "suspended" : "active"}')">
+        ${s.account_status === "active" ? "Suspend" : "Reactivate"}</button>
+    </div>`).join("") || `<p class="empty">No students found</p>`;
+}
+
+async function setAccount(id, status) {
+  try {
+    await api("/api/admin/students/" + id, "PATCH", { account_status: status });
+    loadStudents();
+  } catch (err) { alert(err.message); }
+}
+
+async function loadAudit() {
+  const list = await api("/api/admin/audit");
+  $("#auditList").innerHTML = list.map(x => `
+    <div class="glass row"><small>${esc(x.created)} · ${esc(x.actor)} · <b>${esc(x.action)}</b> · ${esc(x.target)} ${esc(x.detail)}</small></div>`).join("")
+    || `<p class="empty">No activity yet</p>`;
+}
+
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("active", x === t));
+  ["apps", "students", "audit"].forEach(n => $("#t-" + n).hidden = n !== t.dataset.t);
+  if (t.dataset.t === "students") loadStudents();
+  if (t.dataset.t === "audit") loadAudit();
+});
+document.querySelectorAll("#t-apps input, #t-apps select").forEach(el =>
+  el.addEventListener(el.tagName === "INPUT" ? "input" : "change", loadApps));
+$("#sq").addEventListener("input", loadStudents);
+
+async function init() {
+  const [me, sections] = await Promise.all([api("/api/admin/me"), api("/api/admission/schema")]);
+  sections.forEach(s => s.fields.forEach(f => fieldLabels[f.key] = f.label));
+  if (!me.admin) {
+    $("#gate").innerHTML = `Admin login required. <a href="/admin" style="text-decoration:underline">Open admin login</a>`;
+    $("#gate").hidden = false;
+    return;
+  }
+  $("#panel").hidden = false;
+  loadApps();
+}
+init().catch(err => { $("#gate").textContent = err.message; $("#gate").hidden = false; });
+</script>
+</body>
+</html>

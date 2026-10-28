@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Student Portal · Study Point</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&family=Hind+Siliguri:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav class="glass nav">
+  <a class="logo" href="/">Study <b>Point</b> Student</a>
+  <button class="btn ghost small" id="logoutBtn" hidden>Logout</button>
+</nav>
+
+<main>
+  <section class="glass login" id="authBox">
+    <h2 class="sec">🎓 Student Portal</h2>
+    <div class="tabs">
+      <button class="tab active" data-m="login">Login</button>
+      <button class="tab" data-m="register">Register</button>
+    </div>
+    <form class="form" id="loginForm">
+      <input name="email" type="email" placeholder="Email" required>
+      <input name="password" type="password" placeholder="Password" required>
+      <button class="btn">Login</button>
+      <p class="msg bad" id="loginMsg"></p>
+    </form>
+    <form class="form" id="regForm" hidden>
+      <input name="full_name" placeholder="Full name" required>
+      <input name="email" type="email" placeholder="Email" required>
+      <input name="mobile" type="tel" placeholder="Mobile number" required>
+      <input name="password" type="password" placeholder="Password (min 8 characters)" minlength="8" required>
+      <button class="btn">Create Account</button>
+      <p class="msg bad" id="regMsg"></p>
+    </form>
+  </section>
+
+  <div id="portal" hidden>
+    <section class="glass">
+      <h2 class="sec">Welcome, <span id="who"></span></h2>
+      <p>Student ID: <b id="code"></b></p>
+      <p>Admission: <span class="badge" id="admStatus"></span> <small id="appInfo"></small></p>
+      <p class="msg" id="note"></p>
+    </section>
+    <section class="glass">
+      <h2 class="sec">Admission Form</h2>
+      <form class="form" id="admForm"></form>
+      <p class="msg" id="admMsg"></p>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const LABELS = { pending_review: "Pending review", correction_requested: "Correction requested", accepted: "Accepted ✅", rejected: "Rejected" };
+
+let schema = null;
+let hasApp = false;
+
+async function api(url, method = "GET", body) {
+  const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "Request failed");
+  return d;
+}
+
+function renderForm(data, editable) {
+  $("#admForm").innerHTML = schema.map(sec => `
+    <h3 class="fsec">${esc(sec.title)}</h3>
+    ${sec.fields.map(f => `
+      <label class="lbl">${esc(f.label)}${f.required ? " *" : ""}
+        ${f.key === "info"
+          ? `<textarea name="info" rows="3" ${editable ? "" : "disabled"}>${esc(data.info)}</textarea>`
+          : `<input name="${f.key}" type="${f.type}" value="${esc(data[f.key])}" ${f.required ? "required" : ""} ${editable ? "" : "disabled"}>`}
+      </label>`).join("")}`).join("")
+    + (editable ? `<button class="btn">${hasApp ? "Save Changes" : "Submit Application"}</button>` : "");
+}
+
+async function loadPortal() {
+  const me = await api("/api/student/me");
+  $("#authBox").hidden = true;
+  $("#portal").hidden = false;
+  $("#logoutBtn").hidden = false;
+  $("#who").textContent = me.full_name;
+  $("#code").textContent = me.student_code;
+  const { application: a } = await api("/api/student/application");
+  hasApp = !!a;
+  $("#admStatus").textContent = a ? LABELS[a.status] : "Not submitted";
+  $("#appInfo").textContent = a ? `· ID ${a.app_code} · submitted ${a.submitted}` : "";
+  $("#note").textContent = a && a.decision_note ? "Message from office: " + a.decision_note : "";
+  renderForm(a ? a.data : {}, !a || a.editable);
+}
+
+document.querySelectorAll("#authBox .tab").forEach(t => t.onclick = () => {
+  document.querySelectorAll("#authBox .tab").forEach(x => x.classList.toggle("active", x === t));
+  $("#loginForm").hidden = t.dataset.m !== "login";
+  $("#regForm").hidden = t.dataset.m !== "register";
+});
+
+$("#loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  try {
+    await api("/api/student/login", "POST", Object.fromEntries(new FormData(e.target)));
+    await loadPortal();
+  } catch (err) { $("#loginMsg").textContent = err.message; }
+});
+
+$("#regForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target));
+  try {
+    await api("/api/student/register", "POST", data);
+    await api("/api/student/login", "POST", { email: data.email, password: data.password });
+    await loadPortal();
+  } catch (err) { $("#regMsg").textContent = err.message; }
+});
+
+$("#admForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const msg = $("#admMsg");
+  try {
+    const payload = Object.fromEntries(new FormData(e.target));
+    const d = await api("/api/student/application", hasApp ? "PUT" : "POST", payload);
+    msg.className = "msg ok";
+    msg.textContent = d.app_code ? "Submitted! Application ID: " + d.app_code : "Changes saved.";
+    await loadPortal();
+  } catch (err) {
+    msg.className = "msg bad";
+    msg.textContent = err.message;
+  }
+});
+
+$("#logoutBtn").onclick = async () => {
+  await api("/api/student/logout", "POST");
+  location.reload();
+};
+
+// Load the form layout, then show the portal if already logged in
+api("/api/admission/schema").then(s => { schema = s; return loadPortal(); }).catch(() => {});
+</script>
+</body>
+</html>
